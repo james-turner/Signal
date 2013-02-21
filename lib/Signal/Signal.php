@@ -15,12 +15,53 @@ namespace Signal;
 
 class Signal {
 
-    const KILL = SIGKILL; // can't handle this!
     const HUP  = SIGHUP;
     const INT  = SIGINT;
-    const TERM = SIGTERM;
     const QUIT = SIGQUIT;
+    const ILL  = SIGILL;
+    const TRAP = SIGTRAP;
+    const ABRT = SIGABRT;
+    const IOT  = SIGIOT;
+    const BUS  = SIGBUS;
+    const FPE  = SIGFPE;
+    const KILL = SIGKILL; // You can't handle the truth!!
+    const USR1 = SIGUSR1;
+    const SEGV = SIGSEGV;
+    const USR2 = SIGUSR2;
+    const PIPE = SIGPIPE;
+    const ALRM = SIGALRM;
+    const TERM = SIGTERM;
+    const STKFLT = SIGSTKFLT;
+    const CLD  = SIGCLD;
     const CHLD = SIGCHLD;
+    const CONT = SIGCONT;
+    const STOP = SIGSTOP;
+    const TSTP = SIGTSTP;
+    const TTIN = SIGTTIN;
+    const TTOU = SIGTTOU;
+    const URG  = SIGURG;
+    const XCPU = SIGXCPU;
+    const XFSZ = SIGXFSZ;
+    const VTALRM = SIGVTALRM;
+    const PROF = SIGPROF;
+    const WINCH = SIGWINCH;
+    const POLL = SIGPOLL;
+    const IO   = SIGIO;
+    const PWR  = SIGPWR;
+    const SYS  = SIGSYS;
+    const BABY = SIGBABY;
+
+    private $signal;
+
+    public function __construct($sig){
+        $this->signal = self::interpretSignal($sig);
+    }
+
+    public function dispatch($pid = null){
+        $pid || ($pid = posix_getpid());
+        posix_kill($pid, $this->signal);
+        pcntl_signal_dispatch();
+    }
 
     /**
      * @param $signal
@@ -32,13 +73,28 @@ class Signal {
     }
 
     /**
-     * @param $signal
-     * @return mixed
+     * @param string|int|mixed $signal
+     * @return int
      */
     static private function interpretSignal($signal){
         if(is_string($signal)){
-            $scopeResolutionOperator = "::";
-            $signal = constant(__CLASS__ . $scopeResolutionOperator. $signal);
+            // early exit in case this is a system signal or a full string of class constant.
+            if(defined($signal)){
+                return constant($signal);
+            } else {
+                $scopeResolutionOperator = "::";
+                $stringSignal = __CLASS__ . $scopeResolutionOperator. $signal;
+                if(defined($stringSignal)){
+                    $signal = constant($stringSignal);
+                } else {
+                    throw new UnknownSignal();
+                }
+            }
+        }
+        if(is_int($signal)){
+            if($signal < 1 || $signal > 31){
+                throw new UnknownSignal("Invalid signal integer $signal.");
+            }
         }
         return $signal;
     }

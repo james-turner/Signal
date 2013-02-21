@@ -7,23 +7,25 @@ require_once "bootstrap.php";
 use Signal\Signal;
 use IO\IO;
 use Socket\Socket;
-use Unicorn\Server;
+use Worker\Supervisor;
+use Worker\StreamLogger;
 
 // Options
 $opts = array(
     'listeners' => array(
         'tcp://0.0.0.0:8081'
     ),
-    'workers' => 5
+    'workers' => 2,
+    'logger' => new StreamLogger(STDOUT, StreamLogger::DEBUG),
 );
 
 
-$unicorn = new Unicorn\Server($opts);
-$unicorn->on('fork', function($unicorn){
+$taskmaster = new Supervisor($opts);
+$taskmaster->on('fork', function($taskmaster){
     $worker = true;
 
     // Make queue sigs for INT|QUIT|TERM exit fast.
-    foreach($unicorn->QUEUE_SIGS as $sig){
+    foreach($taskmaster->QUEUE_SIGS as $sig){
         Signal::trap($sig, function()use($sig){
             IO::write(STDOUT, "Child trapped $sig\n");
             exit(0);
@@ -38,7 +40,7 @@ $unicorn->on('fork', function($unicorn){
     Signal::trap(Signal::CHLD, SIG_DFL);
 
     IO::write(STDOUT, "In a fork!\n");
-    $ready = $listeners = $unicorn->listeners;
+    $ready = $listeners = $taskmaster->listeners;
 
 retry:
     do {
@@ -74,9 +76,9 @@ retry:
 });
 
 // Start...
-$unicorn->start();
+$taskmaster->start();
 
-$unicorn->wait();
+$taskmaster->wait();
 
 
 

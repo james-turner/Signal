@@ -1,33 +1,40 @@
 <?php
 
-namespace Unicorn;
+namespace Worker;
 
 use IO\IO;
 use Socket\Socket;
 use Signal\Signal;
 use Process\Process;
-use IO\IOStream;
 
-class Server extends \Socket\Server {
+class Supervisor extends \Socket\Server {
 
-    // begin parent stuff!!!!
     public $SIGS_QUEUE = array();
     public $SELF_PIPE = null;
     public $QUEUE_SIGS = array(Signal::INT, Signal::QUIT, Signal::TERM);
 
     public $pids = array();
-    public $events = array();
+
+    public $events = array(
+        'before' => array(),
+        'after' => array()
+    );
 
     private $opts = array(
         'listeners' => array('tcp://0.0.0.0:8081'),
-        'workers' => 2
+        'workers' => 1,
+        'logger'  => null,
     );
 
     public $listeners = array();
 
-    public function __construct($opts = array()){
-        $this->opts = array_merge($this->opts, $opts);
+    public $logger;
 
+    public function __construct($opts = array()){
+        parent::__construct();
+        $this->opts = array_merge($this->opts, $opts);
+        ($logger = $this->opts['logger']) || ($logger = new StreamLogger(STDOUT));
+        $this->logger = $logger;
     }
 
     public function start(){
@@ -38,7 +45,7 @@ class Server extends \Socket\Server {
         $SIGS_QUEUE =& $this->SIGS_QUEUE;
         foreach($this->QUEUE_SIGS as $sig){
             Signal::trap($sig, function()use($sig, &$SIGS_QUEUE, $self){
-                IO::write(STDOUT, "CAUGHT A SIG $sig\n");
+                //$self->logger->debug("Parent trapped signal[{$sig}]");
                 $SIGS_QUEUE[] = $sig;
                 $self->awakenMaster();
             });
@@ -48,7 +55,11 @@ class Server extends \Socket\Server {
 
         $this->initListeners();
         // Spawn workers AFTER trapping signals... otherwise we're doomed!
+        $this->logger->info("master process ready");
+
         $this->spawnMissingWorkers();
+
+        return $this;
     }
 
     public function initListeners(){
@@ -56,6 +67,14 @@ class Server extends \Socket\Server {
         foreach($this->opts['listeners'] as $addr){
             $this->listeners[] = $this->listen($addr);
         }
+    }
+
+    public function before($event, $block){
+
+    }
+
+    public function after($event, $block){
+
     }
 
     public function on($event, $block){
@@ -69,24 +88,29 @@ class Server extends \Socket\Server {
     public function spawnMissingWorkers(){
         $self =& $this;
         for($i=0; $i< $this->opts['workers']; $i++){
-            if($pid = Process::fork(function()use($self){
-                // DURING THIS FORK WE PROBABLY WANT TO CLEAR DOWN
-                // THIS CLASS!!!!
-                $self->initSelfPipe();
-                $self->pids = array();
-                $self->SIGS_QUEUE = array();
+            try {
+                if($pid = Process::fork(function()use($self, $i){
+                    // DURING THIS FORK WE PROBABLY WANT TO CLEAR DOWN
+                    // THIS CLASS!!!!
+                    $self->initSelfPipe();
+                    $self->pids = array();
+                    $self->SIGS_QUEUE = array();
+                    $self->logger->info("worker=$i ready");
 //                fclose($self->SELF_PIPE[0]); // close pipes and reinit them?
-                if($event = @$self->events['fork']){
-                    try {
-                        $event($self);
-                    } catch(\Exception $e){
-                        IO::write(STDOUT, "Fork process shat itself!\n");
+                    if($event = @$self->events['fork']){
+                        try {
+                            $event($self);
+                        } catch(\Exception $e){
+                            $self->logger->crit("fatal error worker=$i");
+                        }
+                        // always exit here... forks should exit!
                     }
-                    // always exit here... forks should exit!
+                    exit;
+                })){
+                    $this->pids[$pid] = $pid;
                 }
-                exit;
-            })){
-                $this->pids[$pid] = $pid;
+            } catch(\RuntimeException $e){
+                $self->logger->crit("unable to fork worker=$i");
             }
         }
     }
@@ -106,24 +130,24 @@ class Server extends \Socket\Server {
                         break;
                     case Signal::INT:
                     case Signal::TERM:
-                        IO::write(STDOUT, "INT|TERM RECEIVED!\n");
+                        $this->logger->debug("caught int|term signal");
                         // Force down
                         $this->stop(false);
                         // Break out of wait
                         break 2;
                     case Signal::QUIT:
-                        IO::write(STDOUT, "QUIT RECEIVED!\n");
+                        $this->logger->debug("caught quit signal");
                         break 2;
                 }
             }catch(\Exception $e){
-                IO::write(STDERR, "Exception happened {$e->getMessage()}\n");
-                sleep(10);
-                // Log the error but ignore it otherwise...
+                $this->logger->alert("Exception happened {$e->getMessage()}\n");
+                // rethrow
+                throw new \RuntimeException("",0,$e);
             }
         } while(true);
         // Graceful shutdown please!
         $this->stop();
-        IO::write(STDOUT, "Shutting down...\n");
+        $this->logger->info("master shutting down");
     }
 
     public function masterSleep($timeout){
@@ -132,12 +156,13 @@ class Server extends \Socket\Server {
 
         IO::write(STDOUT, "Reading off the self pipe!!!\n");
         stream_set_blocking($this->SELF_PIPE[0], 0);
-        IO::write(STDOUT, "Self pipe said '" . IO::read($this->SELF_PIPE[0], 11) . "'.\n"); // read off the stuff! 11 bytes, or perhaps just read until we get nothing...
+        $read = IO::read($this->SELF_PIPE[0], 11);
+        IO::write(STDOUT, "Self pipe said '" . $read . "'.\n"); // read off the stuff! 11 bytes, or perhaps just read until we get nothing...
         stream_set_blocking($this->SELF_PIPE[0], 1);
     }
 
     public function awakenMaster(){
-        IO::write(STDOUT, "Ooh master was woken!\n");
+        $this->logger->debug("waking master process");
         IO::write($this->SELF_PIPE[1], ".");
     }
 
@@ -149,10 +174,10 @@ class Server extends \Socket\Server {
 
     public function killWorker($pid, $signal){
         try {
-            IO::write(STDOUT, "Attempting to kill $pid with $signal.\n");
+            $this->logger->debug("killing worker pid $pid with $signal.\n");
             Process::kill($pid, $signal);
         } catch(\RuntimeException $e){
-            // ignore kill runtime exceptions, this is due to the process already being dead...!
+            // ignore kill runtime exceptions, this is most likely due to the process already being dead...!
             IO::write(STDOUT, "Failed to kill process $pid\n");
         }
     }

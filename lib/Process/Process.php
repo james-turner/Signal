@@ -11,6 +11,10 @@ namespace Process;
 
 class Process {
 
+    static public function pid(){
+        return posix_getpid();
+    }
+
     /**
      * @param Closure|null $block
      * @return int
@@ -22,7 +26,7 @@ class Process {
             (is_string($block) || is_array($block)) && call_user_func($block);
             is_callable($block) && $block();
         } elseif($pid < 0){
-            throw new \RuntimeException("Could not create child process!");
+            throw new ForkException("Could not create child process!");
         }
         return $pid;
     }
@@ -30,6 +34,7 @@ class Process {
     /**
      * @param int|null $options
      * @return array containing pid,status
+     * @throw RuntimeException
      */
     static public function wait($options = null){
         $pid = pcntl_wait($status, $options);
@@ -37,15 +42,15 @@ class Process {
             // Possibility that this will occur if no child processes occur!
             throw new \RuntimeException("Could not wait!\n");
         }
-        return array($pid, $status);
+        return array($pid, pcntl_wexitstatus($status));
     }
 
     /**
      * @param int|string $pid
-     * @param const $signal
+     * @param int $signal
      * @throws \RuntimeException
      */
-    static public function kill($pid, $signal){
+    static public function kill($pid, $signal = SIGKILL){
         if(false === posix_kill($pid, $signal)){
             throw new \RuntimeException("Unable to kill process '$pid'.");
         }

@@ -2,22 +2,22 @@
 
 namespace Socket;
 
-use IO\IOStream;
+use IO\Stream;
 
-class Socket extends IOStream {
+class Socket extends Stream {
 
     /**
      * Non-blocking call to accept on current socket stream
      * @return resource
      */
     public function tryAccept(){
-        is_resource($this->resource) && ($this->setBlocking());
+        is_resource($this->resource) && ($this->unblock());
         try {
             $accepted = $this->accept();
         } catch(\Exception $e){
             $accepted = null;
         }
-        is_resource($this->resource) && ($this->setBlocking(false));
+        is_resource($this->resource) && ($this->block());
         return $accepted;
     }
 
