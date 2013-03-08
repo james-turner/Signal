@@ -20,12 +20,12 @@ $opts = array(
 );
 
 
-$taskmaster = new Supervisor($opts);
-$taskmaster->on('fork', function($taskmaster){
+$supervisor = new Supervisor($opts);
+$supervisor->on('fork', function($supervisor){
     $worker = true;
 
     // Make queue sigs for INT|QUIT|TERM exit fast.
-    foreach($taskmaster->QUEUE_SIGS as $sig){
+    foreach($supervisor->QUEUE_SIGS as $sig){
         Signal::trap($sig, function()use($sig){
             IO::write(STDOUT, "Child trapped $sig\n");
             exit(0);
@@ -40,7 +40,7 @@ $taskmaster->on('fork', function($taskmaster){
     Signal::trap(Signal::CHLD, SIG_DFL);
 
     IO::write(STDOUT, "In a fork!\n");
-    $ready = $listeners = $taskmaster->listeners;
+    $ready = $listeners = $supervisor->listeners;
 
 retry:
     do {
@@ -76,9 +76,9 @@ retry:
 });
 
 // Start...
-$taskmaster->start();
+$supervisor->start();
 
-$taskmaster->wait();
+$supervisor->wait();
 
 
 

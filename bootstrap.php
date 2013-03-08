@@ -1,5 +1,6 @@
 <?php
 
+// use date default timezone set to avoid annoying notices.
 date_default_timezone_set('GMT');
 
 set_include_path(implode(PATH_SEPARATOR, array(

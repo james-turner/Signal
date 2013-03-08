@@ -27,7 +27,7 @@ class StreamLogger {
         'debug'
     );
 
-    private $level = 0;
+    private $level = self::ERR;
 
     public function __construct($stream, $level = self::ERR){
         $this->stream = $stream;
@@ -37,7 +37,7 @@ class StreamLogger {
     public function __call($name, $args){
         $const = constant(__CLASS__."::".strtoupper($name));
         if(null === $const){
-            throw new \RuntimeException("invalid log level");
+            throw new \RuntimeException("Invalid log level '$name'.");
         }
         $this->log(array_shift($args), $const);
     }

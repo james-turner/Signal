@@ -15,6 +15,7 @@ namespace Signal;
 
 class Signal {
 
+    const DFL  = SIG_DFL;
     const HUP  = SIGHUP;
     const INT  = SIGINT;
     const QUIT = SIGQUIT;
@@ -93,7 +94,7 @@ class Signal {
         }
         if(is_int($signal)){
             if($signal < 1 || $signal > 31){
-                throw new UnknownSignal("Invalid signal integer $signal.");
+                throw new UnknownSignal("Invalid signal $signal.");
             }
         }
         return $signal;

@@ -2,4 +2,4 @@
 
 namespace Process;
 
-class ForkException extends \RuntimeException {};
+class ForkException extends ProcessException {};

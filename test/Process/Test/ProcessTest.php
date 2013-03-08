@@ -38,7 +38,7 @@ class ProcessTest extends \PHPUnit_Framework_TestCase {
     public function testBadWait(){
 
         // Waiting on non-existant children will throw a runtime exception.
-        $this->setExpectedException('RuntimeException');
+        $this->setExpectedException('Process\SystemCallException');
         Process::wait();
 
     }
@@ -133,11 +133,22 @@ class ProcessTest extends \PHPUnit_Framework_TestCase {
         $this->assertEquals($pid, $childPid);
     }
 
-    public function testParentPid(){
+    public function testDetachedProcess(){
 
-        posix_getppid();
+        throw new \PHPUnit_Framework_IncompleteTestError();
+
+        $pid = Process::detach(function(){
+            while(true);
+            sleep(1);
+        });
+
+        $this->pidExists($pid);
+
+        // teardown the detached child.
+        posix_kill($pid, SIGKILL);
 
     }
+
 
     /**
      * Simple helper to assist in testing whether a pid

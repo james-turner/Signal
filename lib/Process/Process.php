@@ -11,6 +11,10 @@ namespace Process;
 
 class Process {
 
+    /**
+     * The current process id.
+     * @return int
+     */
     static public function pid(){
         return posix_getpid();
     }
@@ -40,7 +44,7 @@ class Process {
         $pid = pcntl_wait($status, $options);
         if($pid === -1){
             // Possibility that this will occur if no child processes occur!
-            throw new \RuntimeException("Could not wait!\n");
+            throw new SystemCallException();
         }
         return array($pid, pcntl_wexitstatus($status));
     }
@@ -54,6 +58,10 @@ class Process {
         if(false === posix_kill($pid, $signal)){
             throw new \RuntimeException("Unable to kill process '$pid'.");
         }
+        /**
+         * unsure about this call
+         */
+//        pcntl_signal_dispatch();
     }
 
 }

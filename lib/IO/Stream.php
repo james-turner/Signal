@@ -14,7 +14,7 @@ class Stream {
     public function __construct($fd, $mode = "r"){
         $this->fd = $fd;
         $resource = $fd;
-        if(is_string($fd)){
+        if(is_string($resource)){
             $resource = fopen($fd, $mode);
         }
 

@@ -37,7 +37,8 @@ class IO {
             // Requires stream_select errors to be suppressed with @
             $lastError = error_get_last();
             if(isset($lastError['message']) && false !== stripos($lastError['message'], 'interrupted system call')){
-                throw new InterruptException($lastError['message']);
+                // weird dependency on Signal stuff here...
+                throw new \Signal\InterruptException($lastError['message']);
             }
 
             // We choose to return null here for ease of use.
@@ -99,6 +100,8 @@ class IO {
     }
 
     /**
+     * Write to a file or stream an amount
+     * of data of length.
      * @param $name
      * @param $data
      * @param null $length

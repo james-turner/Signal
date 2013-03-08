@@ -3,7 +3,7 @@
 namespace IO\Test;
 
 use IO\IO;
-use IO\InterruptException;
+use Signal\InterruptException;
 
 require_once realpath(__DIR__ ."/../../../bootstrap.php");
 
@@ -200,8 +200,6 @@ class IOTest extends \PHPUnit_Framework_TestCase {
                 pcntl_signal(SIGINT, function(){});
                 IO::select(array($r), null, null, 3);
             } catch(InterruptException $e){
-                fwrite(STDOUT, $e->getMessage()."\n");
-                fwrite(STDOUT, "caught exception\n");
                 fwrite($w, serialize("exception"));
                 fclose($r);
             }
