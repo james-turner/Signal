@@ -1,5 +1,6 @@
 <?php
 
+declare(ticks=1);
 
 namespace Signal\Test;
 
@@ -61,24 +62,33 @@ class SignalTest extends \PHPUnit_Framework_TestCase {
 
     }
 
-    /**
-     * @note Test skipped to due nature of the test run.
-     */
     public function testResettingHandler(){
 
-        $this->markTestSkipped('This test is skipped to the fact that issuing a SIGUSR2 to phpunit will kill it off.');
+        $pid = pcntl_fork();
+        if(0===$pid){
+            // Trap
+            Signal::trap(SIGUSR2, function(){});
+            // Reset
+            Signal::trap(SIGUSR2, SIG_DFL);
+            while(true){
+                sleep(1);
+            }
+            exit(0);
+        }
 
-        $run = false;
-        Signal::trap(SIGUSR2, function()use(&$run){
-            $run = true;
-        });
+        $this->assertProcessUp($pid);
 
-        // Actually doing this causes the signal to kill the test...
-        Signal::trap(SIGUSR2, SIG_DFL);
+        // This should trigger and dispatch the signal to the pid.
+        $this->triggerAndDispatch(SIGUSR2, $pid);
 
-        $this->triggerAndDispatch(SIGUSR2);
-
-        $this->assertFalse($run);
+        try {
+            $status = $this->waitForPidExit($pid);
+            $this->assertEquals(SIGUSR2, $status);
+        } catch(\Exception $e){
+            // kill off the pid if it failed to exit!
+            posix_kill($pid, SIGKILL);
+            $this->fail($e->getMessage());
+        }
 
     }
 
@@ -130,7 +140,7 @@ class SignalTest extends \PHPUnit_Framework_TestCase {
 
     public function testUnknownSignal(){
 
-        $this->setExpectedException('Signal\UnknownSignal');
+        $this->setExpectedException('Signal\Errno\EINVAL');
 
         Signal::trap("SIGSOMETHING", null);
 
@@ -199,6 +209,80 @@ class SignalTest extends \PHPUnit_Framework_TestCase {
 
     }
 
+    public function testBlockingSignals(){
+
+        $pid = pcntl_fork();
+        if(0===$pid){
+            Signal::block(array(SIGTERM));
+            while(true){
+                // loop
+                sleep(1);
+            }
+            exit(0);
+        }
+
+        // wait a sec because we might kill it before it becomes alive!
+        $this->assertProcessUp($pid);
+
+        $killed = posix_kill($pid, SIGTERM);
+        $this->assertTrue($killed);
+
+        // check that the process didn't get killed off!
+        $this->assertProcessUp($pid);
+
+        posix_kill($pid, SIGKILL);
+        pcntl_waitpid($pid, $status);
+
+        $this->assertEquals(0, pcntl_wexitstatus($status));
+
+    }
+
+    // by default PHP blocks SIGQUIT, i have no idea why, but this quirk will assist the test immensely.
+    public function testUnblockingSignals(){
+
+        pcntl_sigprocmask(SIG_BLOCK, array(SIGQUIT), $oldset);
+        $pid = pcntl_fork();
+        if(0===$pid){
+            Signal::unblock(array(SIGQUIT));
+            while(true){
+                sleep(1);
+            }
+            exit(0);
+        }
+        pcntl_sigprocmask(SIG_SETMASK, $oldset);
+
+        $this->assertProcessUp($pid);
+
+        posix_kill($pid, SIGQUIT);
+        sleep(1);
+        // Clear off pending process - don't hang around.
+        pcntl_waitpid($pid, $status, WNOHANG);
+
+        exec("ps $pid", $lines);
+        $this->assertTrue(count($lines) < 2);
+
+        pcntl_waitpid($pid, $status);
+        $this->assertEquals(SIGQUIT, $status);
+
+    }
+
+    public function assertProcessUp($pid){
+        // wait a sec because we might kill it before it becomes alive!
+        $tries = 10;
+        $running = false;
+        while($tries-- > 0){
+            exec("ps -o state $pid", $lines);
+            if(count($lines)>1) {
+                if(trim($lines[1])=='S'){
+                    $running = true;
+                    break;
+                }
+            }
+            usleep(200000);
+        }
+        $this->assertTrue($running, "Process $pid is not up!");
+    }
+
     /**
      * Data provider for minimum and maximum boundaries
      * @return array
@@ -214,12 +298,25 @@ class SignalTest extends \PHPUnit_Framework_TestCase {
      * Helper to package up the
      * @param $signal
      */
-    private function triggerAndDispatch($signal){
+    private function triggerAndDispatch($signal, $pid = null){
 
         // this is posix system safe so don't expect much from Windows!
-        posix_kill(posix_getpid(), $signal);
+        posix_kill($pid?:posix_getpid(), $signal);
         // Weirdly (or not i haven't decided yet) this blocks all further processing...
         pcntl_signal_dispatch();
 
+    }
+
+    private function waitForPidExit($pid){
+        $tries = 10;
+        while($tries-- > 0){
+            $return = pcntl_waitpid($pid, $status, WNOHANG);
+            if(0===$return){
+                usleep(200000);
+            } else {
+                return $status;
+            }
+        }
+        throw new \Exception("Pid did not exit in time!");
     }
 }

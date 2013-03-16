@@ -32,8 +32,8 @@ class Signal {
     const PIPE = SIGPIPE;
     const ALRM = SIGALRM;
     const TERM = SIGTERM;
-    const STKFLT = SIGSTKFLT;
-    const CLD  = SIGCLD;
+//    const STKFLT = SIGSTKFLT;
+//    const CLD  = SIGCLD;
     const CHLD = SIGCHLD;
     const CONT = SIGCONT;
     const STOP = SIGSTOP;
@@ -46,25 +46,41 @@ class Signal {
     const VTALRM = SIGVTALRM;
     const PROF = SIGPROF;
     const WINCH = SIGWINCH;
-    const POLL = SIGPOLL;
+//    const POLL = SIGPOLL;
     const IO   = SIGIO;
-    const PWR  = SIGPWR;
+//    const PWR  = SIGPWR;
     const SYS  = SIGSYS;
     const BABY = SIGBABY;
 
+    /**
+     * @var int|mixed|string
+     */
     private $signal;
 
+    /**
+     *
+     * @param int|mixed|string $sig - Signal
+     */
     public function __construct($sig){
         $this->signal = self::interpretSignal($sig);
     }
 
+    /**
+     * Dispatch the current signal to
+     * the supplied pid or to current process
+     * thread if no pid supplied.
+     *
+     * @param null $pid
+     */
     public function dispatch($pid = null){
-        $pid || ($pid = posix_getpid());
-        posix_kill($pid, $this->signal);
+        posix_kill($pid?:posix_getpid(), $this->signal);
         pcntl_signal_dispatch();
     }
 
     /**
+     * Trap a signal and execute the supplied
+     * closure (block) when the signal is received
+     * by the underlying process.
      * @param $signal
      * @param $block
      */
@@ -74,8 +90,11 @@ class Signal {
     }
 
     /**
+     * Convert the signal parameter into
+     * a valid SIG_* constant for usage.
      * @param string|int|mixed $signal
      * @return int
+     * @throws EINVAL
      */
     static private function interpretSignal($signal){
         if(is_string($signal)){
@@ -88,16 +107,36 @@ class Signal {
                 if(defined($stringSignal)){
                     $signal = constant($stringSignal);
                 } else {
-                    throw new UnknownSignal();
+                    throw new Errno\EINVAL("Unknown signal $signal.");
                 }
             }
         }
         if(is_int($signal)){
             if($signal < 1 || $signal > 31){
-                throw new UnknownSignal("Invalid signal $signal.");
+                throw new Errno\EINVAL("Invalid signal $signal.");
             }
         }
         return $signal;
+    }
+
+    /**
+     * Block off the supplied signals from
+     * being received by the process thread.
+     * @param array $signals
+     */
+    public static function block(array $signals){
+        $signals = array_map(array(__CLASS__, 'interpretSignal'), $signals);
+        pcntl_sigprocmask(SIG_BLOCK, $signals, $old);
+    }
+
+    /**
+     * Unblock an array of signals so that
+     * the process thread will receive them.
+     * @param array $signals
+     */
+    public static function unblock(array $signals){
+        $signals = array_map(array(__CLASS__, 'interpretSignal'), $signals);
+        pcntl_sigprocmask(SIG_UNBLOCK, $signals, $old);
     }
 }
 
