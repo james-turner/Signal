@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Usage of Signal handlers requires
+ * Usage of Signal handlers required
  * declare(ticks=1) to be defined
  * @see http://php.net/manual/en/function.pcntl-signal.php
  */
@@ -44,7 +44,7 @@ class Process {
         $pid = pcntl_wait($status, $options);
         if($pid === -1){
             // Possibility that this will occur if no child processes occur!
-            throw new SystemCallException();
+            throw new Errno\ECHILD();
         }
         return array($pid, pcntl_wexitstatus($status));
     }
@@ -56,7 +56,7 @@ class Process {
      */
     static public function kill($pid, $signal = SIGKILL){
         if(false === posix_kill($pid, $signal)){
-            throw new \RuntimeException("Unable to kill process '$pid'.");
+            throw new Errno\ESRCH();
         }
         /**
          * unsure about this call

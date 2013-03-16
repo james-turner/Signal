@@ -38,7 +38,7 @@ class ProcessTest extends \PHPUnit_Framework_TestCase {
     public function testBadWait(){
 
         // Waiting on non-existant children will throw a runtime exception.
-        $this->setExpectedException('Process\SystemCallException');
+        $this->setExpectedException('Process\Errno\ECHILD');
         Process::wait();
 
     }
@@ -91,7 +91,7 @@ class ProcessTest extends \PHPUnit_Framework_TestCase {
 
     public function testKillFailure(){
 
-        $this->setExpectedException('RuntimeException');
+        $this->setExpectedException('Process\Errno\ESRCH');
         // Random pid number, although in 32bit systems this is the maximum pid, varies by system spec.
         // Unlikely to be this pid number!
         Process::kill(32768, SIGKILL);
