@@ -32,13 +32,14 @@ class IO {
              * we receive an interrupt
              * e.g. PHP Warning:  stream_select(): unable to select [4]: Interrupted system call (max_fd=4)
              */
-
             // Cheaper way to catch the last error than writing a temporary error handler.
             // Requires stream_select errors to be suppressed with @
             $lastError = error_get_last();
             if(isset($lastError['message']) && false !== stripos($lastError['message'], 'interrupted system call')){
-                // weird dependency on Signal stuff here...
-                throw new \Signal\InterruptException($lastError['message']);
+                /**
+                 * @note Do we need to throw a signal exception here?
+                 */
+                throw new InterruptException($lastError['message']);
             }
 
             // We choose to return null here for ease of use.
@@ -59,6 +60,8 @@ class IO {
      */
     static public function read($name, $length = null, $offset = null){
         $close = false;
+
+        if(is_string($name) && !file_exists($name)){throw new NoEntityException();}      // ENOENT
         is_resource($name) || (($name = fopen($name, 'r')) && fseek($name, 0) && ($close = true));
         (null === $offset) || (fseek($name, $offset));
 
@@ -139,7 +142,7 @@ class IO {
     }
 
     /**
-     * @param $fd
+     * @param resource $fd
      * @return bool
      */
     static public function readable($fd){
@@ -148,7 +151,7 @@ class IO {
     }
 
     /**
-     * @param $fd
+     * @param resource $fd
      * @return bool
      */
     static public function writeable($fd){
@@ -157,8 +160,8 @@ class IO {
     }
 
     /**
-     * @param $fd
-     * @param $checks
+     * @param resource $fd
+     * @param array $checks
      * @return bool
      */
     static private function containsMode($fd, array $checks){

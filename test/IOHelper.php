@@ -1,31 +1,36 @@
 <?php
 
 use IO\IO;
+use IO\STDOUT;
+use IO\STDERR;
 
 function with_redirect_io($do){
 
     $pid = posix_getpid();
     $stdoutFile = "test_stdout.{$pid}.log";
     $stderrFile = "test_stderr.{$pid}.log";
-    $STDOUT = fopen($stdoutFile,'a');
-    $STDERR = fopen($stderrFile,'a');
+    STDOUT::reopen($stdoutFile,'a+');
+    STDERR::reopen($stderrFile,'a+');
 
     // This will catch all errors and log them into whatever the STDERR is set to.
-    set_error_handler(function($errno, $errstr, $errfile, $errline = null, $errcontext = null)use(&$STDERR){
-        fwrite($STDERR, "$errno, $errstr, $errfile, $errline");
+    set_error_handler(function($errno, $errstr, $errfile, $errline = null, $errcontext = null){
+        if (0===error_reporting()) {
+            // suppressed so don't report it!
+            return;
+        }
+        fwrite(STDERR, "$errno, $errstr, $errfile, $errline".print_r($errcontext, true)."\n");
+        // By returning  false we are falling back to the default php handler
+        return false;
     });
 
     try {
-        ob_start();
-        call_user_func($do, $STDOUT, $STDERR);
-        fwrite($STDOUT, ob_get_contents());
-        ob_end_clean();
+        call_user_func($do);
     }catch(Exception $e){
         // throw later
     }
 
-    fclose($STDOUT);
-    fclose($STDERR);
+    STDOUT::reopen(STDOUT);
+    STDERR::reopen(STDERR);
 
     restore_error_handler();
 
@@ -35,8 +40,8 @@ function with_redirect_io($do){
 
     register_shutdown_function(function()use($stdoutFile, $stderrFile){
         // unlink files
-        unlink($stdoutFile);
-        unlink($stderrFile);
+//        unlink($stdoutFile);
+//        unlink($stderrFile);
     });
 
 }
@@ -44,9 +49,12 @@ function with_redirect_io($do){
 function wait_workers_ready($path, $number){
     $tries = 10;
     while($tries-- > 0){
-        if(preg_match_all("/worker=\\d+ ready/m", IO::read($path), $matches) === $number){
-            var_dump($matches);
-            return;
+        try {
+            if(preg_match_all("/worker=\\d+ ready/m", IO::read($path), $matches) === $number){
+                return;
+            }
+        } catch(\IO\NoEntityException $e){
+            echo $e->getMessage();
         }
         usleep(200000);
     }
@@ -57,12 +65,25 @@ function wait_workers_ready($path, $number){
 function wait_master_ready($master_log){
     $tries = 10;
     while($tries-- > 0){
-        if(1===preg_match("/master process ready/m", IO::read($master_log))){
-            return;
+        try {
+            if(1===preg_match("/master process ready/m", IO::read($master_log))){
+                return;
+            }
+        } catch(\IO\NoEntityException $e){
+            echo $e->getMessage();
         }
         usleep(200000);
     }
     throw new RuntimeException("master process never became ready");
+}
+
+function assert_shutdown($pid){
+    posix_kill($pid, SIGQUIT);
+    // waiting for death
+    pcntl_waitpid($pid, $status);
+    // assert pid exists
+
+    PHPUnit_Framework_Assert::assertEquals(0, pcntl_wexitstatus($status));
 }
 
 

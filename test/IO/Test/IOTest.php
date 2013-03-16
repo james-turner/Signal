@@ -3,7 +3,7 @@
 namespace IO\Test;
 
 use IO\IO;
-use Signal\InterruptException;
+use IO\InterruptException;
 
 require_once realpath(__DIR__ ."/../../../bootstrap.php");
 
@@ -219,6 +219,15 @@ class IOTest extends \PHPUnit_Framework_TestCase {
             fclose($r);
         }
 
+
+    }
+
+
+    public function testBadFile(){
+
+        $this->setExpectedException('IO\NoEntityException');
+
+        IO::read('unknown.log');
 
     }
 
