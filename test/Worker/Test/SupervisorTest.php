@@ -9,7 +9,12 @@ use Worker\Supervisor;
 
 class SupervisorTest extends PHPUnit_Framework_TestCase {
 
-    public $supervisor;
+    public function setUp(){
+        // Truncate the current log file if it exists to
+        // avoid clashes in 2 tests running in local pid space.
+        $log = 'test_stderr.'.posix_getpid().".log";
+        file_exists($log) and ftruncate(fopen($log, 'w+b'), 0);
+    }
 
     public function tearDown(){
         /**
