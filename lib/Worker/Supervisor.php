@@ -4,14 +4,15 @@ namespace Worker;
 
 use IO\IO;
 use IO\Stream;
+use IO\InterruptException;
 use Signal\Signal;
-use Signal\InterruptException;
 use Process\Process;
-use Process\SystemCallException;
+use Process\Errno\ECHILD;
+use Process\Errno\ESRCH;
 
 class Supervisor {
 
-    public $pids = array();
+    public $workers = array();
     private $signals = array(Signal::QUIT, Signal::TERM, Signal::INT);
     private $queuedSignals = array();
     private $selfPipe;
@@ -19,10 +20,14 @@ class Supervisor {
     private $logger;
     private $opts = array(
         'logger' => '',
+        'workers' => 3,
     );
 
-    public function Supervisor($opts = array()){
-        $this->logger = new StreamLogger('' , StreamLogger::DEBUG);
+    public function __construct($opts = array()){
+        if(!array_key_exists('logger', $opts)){
+            $this->logger = new StreamLogger(STDERR , StreamLogger::DEBUG);
+        }
+        $this->opts = array_merge($this->opts, $opts);
     }
 
     public function start(){
@@ -43,6 +48,8 @@ class Supervisor {
      * in our child workers.
      */
     private function initSignalHooks(){
+        // Unblock all the signals we want to handle!
+        Signal::unblock($this->signals+array(Signal::CHLD));
         // Trap signals.
         $self =& $this;
         foreach($this->signals as $signal){
@@ -51,7 +58,8 @@ class Supervisor {
                 $self->awakenMaster();
             });
         }
-        Signal::trap(Signal::CHLD, function()use($self){ IO::write(STDOUT, "child operand.\n"); $self->awakenMaster(); });
+        // Child sig is a special trap, we don't want to queue this signal for handling.
+        Signal::trap(Signal::CHLD, function()use($self){ $self->awakenMaster(); });
     }
 
     /**
@@ -90,11 +98,13 @@ class Supervisor {
      *
      */
     public function wait(){
+        $this->logger->info('master process ready');
         do {
             $this->reapAllWorkers();
             switch($this->dequeueSignal()){
                 case null:
                     // no signals, sleep for a bit
+                    $this->maintainWorkerCount();
                     $this->masterSleep($this->timeout);
                     break;
                 case Signal::INT:
@@ -107,19 +117,36 @@ class Supervisor {
                     // drop out of loop and let normal shutdown proceed.
                     break 2;
             }
-            IO::write(STDOUT, "NOT INT/TERM\n");
         }while(true);
         // graceful shutdown.
         $this->stop();
+        $this->logger->info('master complete');
+    }
+
+
+    private function maintainWorkerCount(){
+        if(!$off = (count($this->workers) - $this->opts['workers'])){return;}
+        if($off < 0){
+            // too few
+            $this->spawnMissingWorkers();
+            return;
+        }
+        if($off > 0){
+            // take workers with a higher worker number than the amount specified
+            // and kill them off!
+//            while($off > 0){
+//                $this->killWorker(end($this->pids), SIGQUIT);
+//            }
+        }
     }
 
     private function masterSleep($timeout){
         try {
             // Blocking select on pipe, waits until timeout or signal interrupt
-            if((list($ret,,)=IO::select(array($this->selfPipe[0]), null, null, $timeout)) and $ret[0]){return;}
-        } catch(InterruptException $e){ /* do nothing */ }
+            if((list($ret,,)=IO::select(array($this->selfPipe[0]), null, null, $timeout)) and empty($ret)){return;}
+        } catch(InterruptException $e){ /* interrupts are good */ }
 
-        // Read 11 bytes (arbitrary number wtf!) from the pipe,
+        // Read 11 bytes (arbitrary number) from the pipe,
         // should read off multiple tokens.
         $stream = new Stream($this->selfPipe[0],'r');
         $stream->tryRead(11);
@@ -131,22 +158,23 @@ class Supervisor {
      * from the Process::wait(), indicating
      * no processes are available for
      * reaping.
+     * ECHILD can be triggered
+     * by no children pids
      */
     private function reapAllWorkers(){
         do{
             try {
-                list($pid,$status) = Process::wait(WNOHANG);
-                fwrite(STDOUT, "[$pid] exited with ".pcntl_wexitstatus($status). "\n");
-                if(!$pid){return;} // nothing to report
-                $this->removeWorker($pid);
-            } catch(SystemCallException $e){
+                list($pid,) = Process::wait(WNOHANG);
+                if(!$pid){return;} // no exiting pids
+                $nr = $this->removeWorker($pid);
+                $this->logger->info("reaped worker={$nr}");
+            } catch(ECHILD $e){
                 /**
                  * System indicates either no children
                  * or some other weird failure on process
                  * waiting.
                  * Don't hang around, we're done here.
                  */
-                fwrite(STDOUT, "syscall exception\n");
                 break;
             }
         }while(true);
@@ -155,20 +183,28 @@ class Supervisor {
     /**
      * Fire up all missing workers that
      * are not already fired up.
-     * @note hardcoded to 3 at the minute!
+     * @note configured by opts[workers]
      */
     private function spawnMissingWorkers(){
-        for($i=0; $i<3; $i++){
+        $workerNumber = -1;
+        while(($workerNumber+=1) < $this->opts['workers']){
+            // if worker with this worker number is already out there,
+            // then omit this worker number and carry on!
+            if(in_array($workerNumber, $this->workers)){continue;}
+
             $pid = Process::fork(function(){
-                while(true){
+                // Unblock SIGQUIT from the default PHP blockage.
+                Signal::unblock(array(SIGQUIT));
+                // Kill off after 20 secs
+                $i = 20;
+                while($i-- > 0){
                     fwrite(STDOUT, "hello\n");
-                    fflush(STDOUT);
                     sleep(1);
                 }
                 exit(0);
             });
-            IO::write(STDOUT, "worker=$i ready");
-            $this->pids[$pid] = $pid;
+            $this->logger->info("worker=$workerNumber ready");
+            $this->workers[$pid] = $workerNumber;
         }
 
     }
@@ -179,9 +215,7 @@ class Supervisor {
      * @param bool $graceful
      */
     public function stop($graceful = true){
-        while(count($this->pids)){
-            $pidCount = count($this->pids);
-            fwrite(STDOUT, "Killing all workers [$pidCount]\n");
+        while(count($this->workers)){
             $this->killEachWorker($graceful ? Signal::QUIT : Signal::TERM);
             usleep(100000);
             $this->reapAllWorkers();
@@ -195,8 +229,22 @@ class Supervisor {
      * @param int $signal
      */
     private function killEachWorker($signal){
-        foreach($this->pids as $pid){
+        $pids = array_keys($this->workers);
+        foreach($pids as $pid){
+            $this->killWorker($pid, $signal);
+        }
+    }
+
+    /**
+     * Kill the worker by pid with signal
+     * @param $pid
+     * @param $signal
+     */
+    private function killWorker($pid, $signal){
+        try {
             Process::kill($pid, $signal);
+        } catch(ESRCH $e){
+            $this->removeWorker($pid);
         }
     }
 
@@ -204,8 +252,11 @@ class Supervisor {
      * Remove worker indicated by associated
      * pid.
      * @param int $pid
+     * @return int worker number
      */
     private function removeWorker($pid){
-        unset($this->pids[$pid]);
+        $workerNumber = $this->workers[$pid];
+        unset($this->workers[$pid]);
+        return $workerNumber;
     }
 }
