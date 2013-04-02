@@ -37,7 +37,7 @@ class StreamLogger {
     public function __call($name, $args){
         $const = constant(__CLASS__."::".strtoupper($name));
         if(null === $const){
-            throw new \RuntimeException("Invalid log level '$name'.");
+            throw new \InvalidArgumentException("Invalid log level '$name'.");
         }
         $this->log(array_shift($args), $const);
     }
