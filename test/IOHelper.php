@@ -53,9 +53,7 @@ function wait_workers_ready($path, $number){
             if(preg_match_all("/worker=\\d+ ready/m", IO::read($path), $matches) === $number){
                 return;
             }
-        } catch(\IO\NoEntityException $e){
-            echo $e->getMessage();
-        }
+        } catch(\IO\NoEntityException $e){ /* file not available yet */ }
         usleep(200000);
     }
     throw new RuntimeException("worker processes never became ready");
@@ -69,9 +67,7 @@ function wait_master_ready($master_log){
             if(1===preg_match("/master process ready/m", IO::read($master_log))){
                 return;
             }
-        } catch(\IO\NoEntityException $e){
-            echo $e->getMessage();
-        }
+        } catch(\IO\NoEntityException $e){ /* file not available yet */ }
         usleep(200000);
     }
     throw new RuntimeException("master process never became ready");
