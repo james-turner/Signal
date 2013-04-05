@@ -149,10 +149,7 @@ class STDOUT extends \php_user_filter {
         if($file_or_stream !== static::RAW){
             $read_write = STREAM_FILTER_WRITE;
             $params = array($file_or_stream, $mode);
-
-            // Enforce registration of called class as a stream filtration.
-//            stream_filter_register(get_called_class(), get_called_class());
-
+            // appended NOT prepended to allow other filters to perform their function before we trap it.
             static::$registered = stream_filter_append(static::RAW, get_called_class(), $read_write, $params);
         }
     }
@@ -160,4 +157,5 @@ class STDOUT extends \php_user_filter {
 
 // Register filter
 defined("PHPOUT") || define("PHPOUT", fopen('php://output','w'));
+// Enforce registration of called class as a stream filtration.
 stream_filter_register("IO\\STDOUT", "IO\\STDOUT");

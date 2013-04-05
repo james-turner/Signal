@@ -149,12 +149,18 @@ class STDOUTTest extends PHPUnit_Framework_TestCase {
         $this->assertEquals('world', $data2);
     }
 
+    /**
+     * error_log calls appear not to be able to be handled.
+     * @markTestSkipped
+     */
     public function testRedirectingErrorLog(){
 
-        throw new PHPUnit_Framework_IncompleteTestError();
+        $this->markTestSkipped("error_log does NOT perform a normal write to STDERR via the SAPI handler. Thereby it is uncontrollable.");
 
         STDERR::reopen($this->tmpFilename,'w+');
 
+        // SHOULD log to the SAPI error logger: stderr on cli.
+        echo "error log is" .ini_get('error_log') . "\n";
         error_log("oops");
 
         STDERR::reopen(STDERR);
@@ -168,8 +174,6 @@ class STDOUTTest extends PHPUnit_Framework_TestCase {
     }
 
     public function testRedirectingTriggerError(){
-
-        throw new PHPUnit_Framework_IncompleteTestError();
 
         STDERR::reopen($this->tmpFilename,'w+');
 
@@ -269,6 +273,26 @@ class STDOUTTest extends PHPUnit_Framework_TestCase {
 
         $this->assertEquals('hello world',fread($fd, 1024));
 
+    }
+
+    /**
+     * In the event that stdout is redirected but
+     * buffering occurs after a redirect then we
+     * shouldn't really expect anything on the actual
+     * stdout.
+     */
+    public function testDoubleBuffering(){
+        // redirect stdout to tmp.
+        STDOUT::reopen($this->tmpFilename);
+
+        ob_start();
+        echo "hello world";
+        $echo = ob_get_contents();
+        ob_get_clean();
+
+        $data = fread(fopen($this->tmpFilename, 'r'),8192);
+        $this->assertEquals("", $data);
+        $this->assertEquals($echo, "hello world");
     }
 
     /**
