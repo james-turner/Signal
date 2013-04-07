@@ -21,8 +21,8 @@ class STDERR extends STDOUT {
         if($file_or_stream !== static::RAW){
             // capturing trigger_error messages
             static::$errHandler = set_error_handler(function($errno, $errstr, $errfile, $errline, $errcontext){
-                if($errno === 0) return; // exit on suppressed errors.
-                fwrite(STDERR::RAW, $errstr);
+                if(0 === error_reporting()) return; // exit on suppressed errors.
+                fwrite(STDERR::RAW, "{$errstr}\n");
             });
         }
     }

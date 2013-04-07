@@ -63,13 +63,16 @@ class STDOUTTest extends PHPUnit_Framework_TestCase {
         // reset the stdout to original.
         STDOUT::reopen(STDOUT);
 
+        ob_start();
         echo "world";
+        $echo = ob_get_contents();
+        ob_end_clean();
 
         // Open tmp file for reading
         $data = fread(fopen($this->tmpFilename,'r'), 1024);
 
         $this->assertEquals('hello', $data);
-        $this->assertNotEquals('world', $data);
+        $this->assertNotEquals($echo, $data);
 
 
     }
