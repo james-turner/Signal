@@ -12,6 +12,7 @@ class IO {
      * @param array|null $exceptions
      * @param int|float $seconds
      * @return array|null
+     * @throws InterruptException
      */
     static public function select($reads, $writes, $exceptions, $seconds){
         $microseconds = null;
