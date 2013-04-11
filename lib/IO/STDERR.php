@@ -22,7 +22,7 @@ class STDERR extends STDOUT {
             // capturing trigger_error messages
             static::$errHandler = set_error_handler(function($errno, $errstr, $errfile, $errline, $errcontext){
                 if(0 === error_reporting()) return; // exit on suppressed errors.
-                fwrite(STDERR::RAW, "{$errstr}\n");
+                fwrite(STDERR::RAW, $errstr);
             });
         }
     }
