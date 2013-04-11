@@ -187,7 +187,7 @@ class SignalTest extends \PHPUnit_Framework_TestCase {
             // child!
             fclose(STDOUT);
             fclose(STDERR);
-            sleep(1);
+            sleep(5);
             exit(0);
         }
 
@@ -268,12 +268,13 @@ class SignalTest extends \PHPUnit_Framework_TestCase {
 
     public function assertProcessUp($pid){
         // wait a sec because we might kill it before it becomes alive!
-        $tries = 10;
+        $tries = 20;
         $running = false;
         while($tries-- > 0){
             exec("ps -o state $pid", $lines);
             if(count($lines)>1) {
-                if(trim($lines[1])=='S'){
+                // expect some form of sleep state
+                if(preg_match('/S[+]?/', trim($lines[1]), $matches)){
                     $running = true;
                     break;
                 }
