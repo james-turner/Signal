@@ -13,21 +13,24 @@ use Process\Errno\ESRCH;
 class Supervisor {
 
     public $workers = array();
-    private $signals = array(Signal::QUIT, Signal::TERM, Signal::INT);
+    private $signals = array(Signal::QUIT, Signal::TERM, Signal::INT, Signal::TTIN, Signal::TTOU);
     private $queuedSignals = array();
     private $selfPipe;
     private $timeout = 15;
     private $logger;
+    private $workerProcesses;
     private $opts = array(
         'logger' => '',
         'workers' => 3,
     );
+    private $worker = null;
 
     public function __construct($opts = array()){
         if(!array_key_exists('logger', $opts)){
             $this->logger = new StreamLogger(STDERR , StreamLogger::DEBUG);
         }
         $this->opts = array_merge($this->opts, $opts);
+        $this->workerProcesses = $this->opts['workers'];
     }
 
     public function start(){
@@ -60,6 +63,12 @@ class Supervisor {
         }
         // Child sig is a special trap, we don't want to queue this signal for handling.
         Signal::trap(Signal::CHLD, function()use($self){ $self->awakenMaster(); });
+    }
+
+    public function run($worker = null){
+        if(is_callable($worker)){
+            $this->worker = $worker;
+        }
     }
 
     /**
@@ -113,6 +122,14 @@ class Supervisor {
                     $this->stop(false);
                     // drop out of loop
                     break 2;
+                case Signal::TTIN:
+                    // increment worker count
+                    $this->workerProcesses++;
+                    break;
+                case Signal::TTOU:
+                    // decrement worker count
+                    $this->workerProcesses--;
+                    break;
                 case Signal::QUIT:
                     // drop out of loop and let normal shutdown proceed.
                     break 2;
@@ -123,9 +140,11 @@ class Supervisor {
         $this->logger->info('master complete');
     }
 
-
+    /**
+     * Maintain the correct number of workers
+     */
     private function maintainWorkerCount(){
-        if(!$off = (count($this->workers) - $this->opts['workers'])){return;}
+        if(!$off = (count($this->workers) - $this->workerProcesses)){return;}
         if($off < 0){
             // too few
             $this->spawnMissingWorkers();
@@ -134,9 +153,13 @@ class Supervisor {
         if($off > 0){
             // take workers with a higher worker number than the amount specified
             // and kill them off!
-//            while($off > 0){
-//                $this->killWorker(end($this->pids), SIGQUIT);
-//            }
+            for($i=1; $i<=$off; $i++){
+                // count from the back of workers, deleting highest workers first.
+                $workerNum = count($this->workers)-$i;
+                if($pid = array_search($workerNum, $this->workers)){
+                    $this->killWorker($pid, SIGQUIT);
+                }
+            }
         }
     }
 
@@ -187,26 +210,27 @@ class Supervisor {
      */
     private function spawnMissingWorkers(){
         $workerNumber = -1;
-        while(($workerNumber+=1) < $this->opts['workers']){
+        $worker = &$this->worker;
+        if(null === $worker) {
+            $this->logger->crit("invalid worker");
+            throw new \RuntimeException("Invalid worker.");
+        }
+        while(($workerNumber+=1) < $this->workerProcesses){
             // if worker with this worker number is already out there,
             // then omit this worker number and carry on!
             if(in_array($workerNumber, $this->workers)){continue;}
 
-            $pid = Process::fork(function(){
+            $pid = Process::fork(function()use($worker){
                 // Unblock SIGQUIT from the default PHP blockage.
                 Signal::unblock(array(SIGQUIT));
-                // Kill off after 20 secs
-                $i = 20;
-                while($i-- > 0){
-                    fwrite(STDOUT, "hello\n");
-                    sleep(1);
-                }
+                // Invoke worker function
+                call_user_func($worker);
+                // Always exit safely - can't risk more than 1 supervisor!
                 exit(0);
             });
             $this->logger->info("worker=$workerNumber ready");
             $this->workers[$pid] = $workerNumber;
         }
-
     }
 
     /**
@@ -252,7 +276,7 @@ class Supervisor {
      * Remove worker indicated by associated
      * pid.
      * @param int $pid
-     * @return int worker number
+     * @return int|null worker number
      */
     private function removeWorker($pid){
         $workerNumber = $this->workers[$pid];

@@ -9,11 +9,18 @@ use Worker\Supervisor;
 
 class SupervisorTest extends PHPUnit_Framework_TestCase {
 
+    private $worker;
+
     public function setUp(){
-        // Truncate the current log file if it exists to
-        // avoid clashes in 2 tests running in local pid space.
-        $log = 'test_stderr.'.posix_getpid().".log";
-        file_exists($log) and ftruncate(fopen($log, 'w+b'), 0);
+
+        // Dummy worker for testing.
+        $this->worker = function(){
+            $seconds = 60;
+            while($seconds-- > 0){
+                echo "hello\n";
+                sleep(1);
+            }
+        };
     }
 
     public function tearDown(){
@@ -24,7 +31,7 @@ class SupervisorTest extends PHPUnit_Framework_TestCase {
          * messing with the forked process!
          */
         // Clear back the sign handlers to their originals.
-        foreach(array(SIGQUIT, SIGTERM, SIGINT, SIGCHLD) as $signal){
+        foreach(array(SIGQUIT, SIGTERM, SIGINT, SIGTTIN, SIGTTOU, SIGCHLD) as $signal){
             pcntl_signal($signal, SIG_DFL);
         }
     }
@@ -39,8 +46,10 @@ class SupervisorTest extends PHPUnit_Framework_TestCase {
         list($r, $w) = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
         $pid = pcntl_fork();
         if($pid === 0){
-            with_redirect_io(function()use(&$w){
+            $worker = $this->worker;
+            with_redirect_io(function()use(&$w, $worker){
                 $foreman = new Supervisor();
+                $foreman->run($worker);
                 $foreman->start();
                 fwrite($w, json_encode($foreman->workers));
                 fclose($w);
@@ -89,30 +98,101 @@ class SupervisorTest extends PHPUnit_Framework_TestCase {
         // Kill the master
         posix_kill($pid, SIGQUIT);
 
-        try {
-            // Wait for forked process to exit successfully.
-            $this->waitPidExit($pid);
-        }catch(Exception $e){
-            // Failure to exit forces a shutdown.
-            $this->killShutdown($pid);
-            $this->fail("Failed to shutdown master $pid");
+        $this->assertShutdown($pid, $log);
+
+    }
+
+    public function testIncrementingWorkersOnTheFly(){
+
+        $pid = pcntl_fork();
+        if($pid === 0){
+            $worker = $this->worker;
+            with_redirect_io(function()use(&$w, $worker){
+                $foreman = new Supervisor();
+                $foreman->run($worker);
+                $foreman->start();
+                $foreman->wait();
+            });
+            exit(0);
         }
 
-        // Check master shuts down
-        $this->assertMasterComplete($log);
+        $log = "test_stderr.{$pid}.log";
+        wait_workers_ready($log, 3);
+        wait_master_ready($log);
+
+        posix_kill($pid, SIGTTIN);
+
+        // expect another work to become ready!
+        $failed = true;
+        try {
+            wait_workers_ready($log, 4);
+            $failed = false;
+        } catch(Exception $e){}
+        // term the supervisor
+        posix_kill($pid, SIGTERM);
+
+        $this->assertShutdown($pid, $log);
+
+        if($failed) $this->fail("Could not instantiate extra worker");
+
+    }
+
+    public function testDecrementingWorkersOnTheFly(){
+
+        $pid = pcntl_fork();
+        if($pid === 0){
+            $worker = $this->worker;
+            with_redirect_io(function()use(&$w, $worker){
+                $foreman = new Supervisor();
+                $foreman->run($worker);
+                $foreman->start();
+                $foreman->wait();
+            });
+            exit(0);
+        }
+
+        $log = "test_stderr.{$pid}.log";
+        wait_workers_ready($log, 3);
+        wait_master_ready($log);
+
+        posix_kill($pid, SIGTTOU);
+
+        // expect another work to become ready!
+        try {
+            $stopped = false;
+            $tries = 10;
+            while($tries-- > 0){
+                // should kill off a worker
+                if(1===preg_match_all("/reaped worker=\\d+/m", fread(fopen($log,'r'),8092), $matches)){
+                    $stopped = true;
+                    break;
+                }
+                usleep(200000);
+            }
+        } catch(Exception $e){}
+        // term the supervisor
+        posix_kill($pid, SIGTERM);
+
+        $this->assertShutdown($pid, $log);
+
+        if(!$stopped) $this->fail("Could not reap extra worker");
 
     }
 
     public function testVariableNumberOfWorkers(){
 
-        $foreman = new Supervisor(array('workers' => 6));
+        $this->truncateLog();
+
+        $nrWorkers = 9;
+        $foreman = new Supervisor(array('workers' => $nrWorkers));
+        $foreman->run($this->worker);
         with_redirect_io(function()use($foreman){
             $foreman->start();
         });
 
         $pid = posix_getpid();
         $log = "test_stderr.{$pid}.log";
-        wait_workers_ready($log, 6);
+        wait_workers_ready($log, $nrWorkers);
 
         with_redirect_io(function()use($foreman){
             $foreman->stop();
@@ -122,6 +202,7 @@ class SupervisorTest extends PHPUnit_Framework_TestCase {
 
     public function testHotReload(){
 
+        $this->markTestIncomplete("Implement me!");
         // fire up server
         // restart server
         // test hot proc load
@@ -134,9 +215,10 @@ class SupervisorTest extends PHPUnit_Framework_TestCase {
 
     public function testStoppingAllWorkers(){
 
-//        throw new PHPUnit_Framework_IncompleteTestError();
+        $this->truncateLog();
 
         $foreman = new Supervisor();
+        $foreman->run($this->worker);
         with_redirect_io(function()use($foreman){
             $foreman->start();
         });
@@ -172,8 +254,10 @@ class SupervisorTest extends PHPUnit_Framework_TestCase {
         $foremanPid = pcntl_fork();
         if($foremanPid === 0){
             // fire up the supervisor!
-            with_redirect_io(function()use(&$w){
+            $worker = $this->worker;
+            with_redirect_io(function()use(&$w, $worker){
                 $foreman = new Supervisor();
+                $foreman->run($worker);
                 $foreman->start();
                 // send ready pipe signal.
                 fwrite($w, ".");
@@ -186,10 +270,8 @@ class SupervisorTest extends PHPUnit_Framework_TestCase {
         } else {
 
             // wait on ready pipe.
-            $rs = array($r);
-            $ws = $ex = array();
             // blocks until ready pipe has been written to.
-            $num = stream_select($rs, $ws, $ex, 10);
+            $num = stream_select($rs = array($r), &$ws, &$ex, 10);
             $this->assertEquals(1, count($num));
 
             // Wait for master/workers to be ready.
@@ -203,14 +285,7 @@ class SupervisorTest extends PHPUnit_Framework_TestCase {
             $this->assertTrue($killed);
 
             // Wait for parent to exit.
-            try {
-                $this->waitPidExit($foremanPid);
-            }catch (Exception $e){
-                $this->killShutdown($foremanPid);
-                $this->fail("Failed to terminate parent using SIGQUIT.");
-            }
-
-            $this->assertMasterComplete($log);
+            $this->assertShutdown($foremanPid, $log);
 
         }
 
@@ -224,8 +299,10 @@ class SupervisorTest extends PHPUnit_Framework_TestCase {
         $foremanPid = pcntl_fork();
         if($foremanPid === 0){
             // fire up the supervisor!
-            with_redirect_io(function()use(&$w){
+            $worker = $this->worker;
+            with_redirect_io(function()use(&$w, $worker){
                 $foreman = new Supervisor();
+                $foreman->run($worker);
                 $foreman->start();
                 // send ready pipe signal.
                 fwrite($w, ".");
@@ -252,18 +329,31 @@ class SupervisorTest extends PHPUnit_Framework_TestCase {
             $killed = posix_kill($foremanPid, SIGTERM);
             $this->assertTrue($killed);
 
-            try {
-                $this->waitPidExit($foremanPid);
-            }catch (Exception $e){
-                $this->killShutdown($foremanPid);
-                $this->fail("Failed to terminate (parent and children).");
-            }
-
-            $this->assertMasterComplete($log);
+            $this->assertShutdown($foremanPid, $log);
 
         }
 
     }
+
+    public function testPauseSupervisor(){
+        $this->markTestSkipped("Implementation missing.");
+        // issue CTRL^Z in foreground process and it should pause, and all children should pause too?
+    }
+
+
+    public function testBadWorker(){
+
+        $this->truncateLog();
+
+        $this->setExpectedException('RuntimeException', 'Invalid worker.');
+
+        with_redirect_io(function(){
+            $foreman = new Supervisor();
+            $foreman->start();
+        });
+
+    }
+
 
     /**
      * Wait for this PID to exit.
@@ -273,7 +363,7 @@ class SupervisorTest extends PHPUnit_Framework_TestCase {
      * @throws Exception
      */
     private function waitPidExit($pid){
-        $tries = 100;
+        $tries = 200;
         while($tries-- > 0){
             $exited = pcntl_waitpid($pid, $status, WNOHANG);
             if($exited === 0){
@@ -285,7 +375,7 @@ class SupervisorTest extends PHPUnit_Framework_TestCase {
                 return;
             }
         }
-        throw new Exception("Pid {$pid} never exited!");
+        throw new RuntimeException("Pid {$pid} never exited!");
     }
 
     /**
@@ -300,6 +390,7 @@ class SupervisorTest extends PHPUnit_Framework_TestCase {
         $killed or print("Shutdown failure with message: " . posix_strerror(posix_get_last_error()));
         // assert killed
         $this->assertTrue($killed);
+        // reap the child because we don't want a zombie apocalypse
         pcntl_waitpid($pid, $status);
     }
 
@@ -322,6 +413,17 @@ class SupervisorTest extends PHPUnit_Framework_TestCase {
         throw new Exception("Master complete failed");
     }
 
+    private function assertShutdown($pid, $log){
+        try {
+            $this->waitPidExit($pid);
+        }catch (Exception $e){
+            $this->killShutdown($pid);
+            $this->fail("Failed to terminate (parent and children): " . $e->getMessage());
+        }
+
+        $this->assertMasterComplete($log);
+    }
+
     /**
      * Simple helper to assist in testing whether a pid
      * is currently a running process.
@@ -331,6 +433,16 @@ class SupervisorTest extends PHPUnit_Framework_TestCase {
     private function pidExists($pid){
         exec("ps $pid", $lines, $return);
         return count($lines) >= 2;
+    }
+
+    /**
+     *
+     */
+    private function truncateLog(){
+        // Truncate the current log file if it exists to
+        // avoid clashes in 2 tests running in local pid space.
+        $log = 'test_stderr.'.posix_getpid().".log";
+        file_exists($log) and ftruncate(fopen($log, 'w+b'), 0);
     }
 
 }
