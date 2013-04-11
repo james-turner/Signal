@@ -28,26 +28,26 @@ function with_redirect_io($do){
     }catch(Exception $e){
         // throw later
     }
-
+    // roepen files to their correct outputs.
     STDOUT::reopen(STDOUT);
     STDERR::reopen(STDERR);
-
+    // restore previous error handler.
     restore_error_handler();
-
-    if(isset($e)){
-        throw $e;
-    }
 
     register_shutdown_function(function()use($stdoutFile, $stderrFile){
         // unlink files
-//        unlink($stdoutFile);
-//        unlink($stderrFile);
+//        @unlink($stdoutFile);
+//        @unlink($stderrFile);
     });
 
+    // throw any errors
+    if(isset($e)){
+        throw $e;
+    }
 }
 
 function wait_workers_ready($path, $number){
-    $tries = 10;
+    $tries = 100;
     while($tries-- > 0){
         try {
             if(preg_match_all("/worker=\\d+ ready/m", IO::read($path), $matches) === $number){
