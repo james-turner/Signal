@@ -65,7 +65,10 @@ class Supervisor {
         Signal::trap(Signal::CHLD, function()use($self){ $self->awakenMaster(); });
     }
 
-    public function run($worker = null){
+    /**
+     * @param array|\Closure $worker
+     */
+    public function run($worker){
         if(is_callable($worker)){
             $this->worker = $worker;
         }
@@ -207,6 +210,7 @@ class Supervisor {
      * Fire up all missing workers that
      * are not already fired up.
      * @note configured by opts[workers]
+     * @throws \RuntimeException
      */
     private function spawnMissingWorkers(){
         $workerNumber = -1;
@@ -235,7 +239,7 @@ class Supervisor {
 
     /**
      * Stop the supervisor in graceful
-     * or not graceful mode.
+     * or non-graceful mode.
      * @param bool $graceful
      */
     public function stop($graceful = true){
