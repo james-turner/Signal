@@ -237,7 +237,6 @@ class SignalTest extends \PHPUnit_Framework_TestCase {
 
     }
 
-    // by default PHP blocks SIGQUIT, i have no idea why, but this quirk will assist the test immensely.
     public function testUnblockingSignals(){
 
         pcntl_sigprocmask(SIG_BLOCK, array(SIGQUIT), $oldset);
@@ -249,19 +248,19 @@ class SignalTest extends \PHPUnit_Framework_TestCase {
             }
             exit(0);
         }
+        // Put mask back on this process.
         pcntl_sigprocmask(SIG_SETMASK, $oldset);
 
         $this->assertProcessUp($pid);
 
         posix_kill($pid, SIGQUIT);
-        sleep(1);
-        // Clear off pending process - don't hang around.
-        pcntl_waitpid($pid, $status, WNOHANG);
+        // Clear off pending process.
+        pcntl_waitpid($pid, $status);
 
         exec("ps $pid", $lines);
         $this->assertTrue(count($lines) < 2);
 
-        pcntl_waitpid($pid, $status);
+        // Check status exit was SIGQUIT
         $this->assertEquals(SIGQUIT, $status);
 
     }
