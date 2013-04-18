@@ -45,7 +45,10 @@ class StreamLogger {
     private function log($msg, $level){
         if($level <= $this->level){
             $format = "%s [%s] %s\n";
-            $date = @date("Y-m-d H:i:s", time()); // using @ to avoid errors when date_default_timezone_set not having been done!
+            $t = microtime(true);
+            $micro = sprintf("%06d",($t - floor($t)) * 1000000);
+            $d = new \DateTime( date('Y-m-d H:i:s.'.$micro,$t) );
+            $date = $d->format("Y-m-d H:i:s.u");
             fwrite($this->stream, sprintf($format, $date, $this->levels[$level], $msg));
         }
     }
