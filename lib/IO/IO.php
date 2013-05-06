@@ -57,7 +57,7 @@ class IO {
      * @param null $length
      * @param null $offset
      * @return string
-     * @throws IOException
+     * @throws IOException|NoEntityException
      */
     static public function read($name, $length = null, $offset = null){
         $close = false;
